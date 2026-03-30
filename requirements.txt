@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+pandas
+httpx
+dagster
+dagster-webserver
+python-dotenv
+pytest
+pytest-mock

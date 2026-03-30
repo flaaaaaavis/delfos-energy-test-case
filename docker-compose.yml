@@ -1,0 +1,105 @@
+version: "3.9"
+
+services:
+  source_db:
+    image: postgres:15
+    container_name: source_db
+    restart: always
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${SOURCE_DB}
+    ports:
+      - "5433:5432"
+    volumes:
+      - source_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  target_db:
+    image: postgres:15
+    container_name: target_db
+    restart: always
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${TARGET_DB}
+    ports:
+      - "5434:5432"
+    volumes:
+      - target_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: src/api/Dockerfile
+    container_name: api
+    restart: always
+    depends_on:
+      source_db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@source_db:5432/${SOURCE_DB}
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    command: uvicorn api.app.main:app --host 0.0.0.0 --port 8000
+
+  etl:
+    build:
+      context: .
+      dockerfile: src/etl/Dockerfile
+    container_name: etl
+    restart: always
+    depends_on:
+      api:
+        condition: service_started
+      target_db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      API_URL: http://api:8000
+      DB_TARGET: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@target_db:5432/${TARGET_DB}
+    volumes:
+      - .:/app
+    command: sleep infinity
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: src/orchestrator/Dockerfile
+    container_name: orchestrator
+    restart: always
+    depends_on:
+      etl:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      API_URL: http://api:8000
+      DB_TARGET: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@target_db:5432/${TARGET_DB}
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+    command: orchestrator dev -h 0.0.0.0 -p 3000
+
+volumes:
+  source_data:
+  target_data:
